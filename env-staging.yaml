@@ -1,0 +1,3 @@
+GOOGLE_CLOUD_PROJECT: apt-phenomenon-458508-m3
+PUBSUB_TOPIC_SHOPIFY: shopify-webhooks-staging
+PUBSUB_TOPIC_PARCEL_PANEL: parcel-panel-webhooks-staging

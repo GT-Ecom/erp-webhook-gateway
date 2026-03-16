@@ -82,7 +82,7 @@ gcloud run deploy erp-webhook-gateway-staging \
   --region $REGION \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,PUBSUB_TOPIC_SHOPIFY=shopify-webhooks-staging,PUBSUB_TOPIC_PARCEL_PANEL=parcel-panel-webhooks-staging" \
+  --env-vars-file=env-staging.yaml \
   --service-account=erpnext-staging-sa@$PROJECT_ID.iam.gserviceaccount.com
 
 # Production
@@ -91,7 +91,7 @@ gcloud run deploy erp-webhook-gateway \
   --region $REGION \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,PUBSUB_TOPIC_SHOPIFY=shopify-webhooks,PUBSUB_TOPIC_PARCEL_PANEL=parcel-panel-webhooks" \
+  --env-vars-file=env-production.yaml \
   --service-account=erpnext-prod-sa@$PROJECT_ID.iam.gserviceaccount.com
 ```
 
