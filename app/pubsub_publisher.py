@@ -24,23 +24,27 @@ def get_publisher_client() -> pubsub_v1.PublisherClient:
 
 def publish_webhook(
     topic_name: str,
-    payload: Dict[str, Any],
+    payload_bytes: bytes,
     site_name: str,
     source: str,
     topic: str,
     shop_domain: str,
-    event_id: Optional[str] = None
+    event_id: Optional[str] = None,
+    signature: Optional[str] = None,
+    signature_header: Optional[str] = None
 ) -> Future:
     """Publish webhook to Pub/Sub
     
     Args:
         topic_name: Pub/Sub topic name
-        payload: Webhook payload
+        payload_bytes: Raw webhook payload bytes (preserved exactly for signature verification)
         site_name: Target site name
         source: Source identifier (shopify/parcel_panel)
         topic: Webhook topic (e.g., orders/create)
         shop_domain: Shop domain
         event_id: Optional event ID (generated if not provided)
+        signature: HMAC signature for verification
+        signature_header: Header name for signature (e.g., X-Shopify-Hmac-SHA256)
         
     Returns:
         Pub/Sub publish future
@@ -51,7 +55,7 @@ def publish_webhook(
     publisher = get_publisher_client()
     topic_path = publisher.topic_path(settings.google_cloud_project, topic_name)
     
-    data = json.dumps({'payload': payload}).encode('utf-8')
+    data = payload_bytes
     
     attributes = {
         'event_id': event_id,
@@ -61,9 +65,15 @@ def publish_webhook(
         'site_name': site_name,
     }
     
+    if signature:
+        attributes['signature'] = signature
+    if signature_header:
+        attributes['signature_header'] = signature_header
+    
     logger.info(
         f"Publishing to {topic_name}: event_id={event_id}, site_name={site_name}, "
-        f"source={source}, topic={topic}"
+        f"source={source}, topic={topic}, has_signature={signature is not None}, "
+        f"payload_size={len(payload_bytes)}"
     )
     
     future = publisher.publish(topic_path, data, **attributes)
@@ -72,38 +82,44 @@ def publish_webhook(
 
 
 def publish_shopify_webhook(
-    payload: Dict[str, Any],
+    payload_bytes: bytes,
     site_name: str,
     topic: str,
     shop_domain: str,
-    event_id: Optional[str] = None
+    event_id: Optional[str] = None,
+    signature: Optional[str] = None
 ) -> Future:
     """Publish Shopify webhook to Pub/Sub"""
     return publish_webhook(
         topic_name=settings.pubsub_topic_shopify,
-        payload=payload,
+        payload_bytes=payload_bytes,
         site_name=site_name,
         source='shopify',
         topic=topic,
         shop_domain=shop_domain,
-        event_id=event_id
+        event_id=event_id,
+        signature=signature,
+        signature_header='X-Shopify-Hmac-SHA256'
     )
 
 
 def publish_parcel_panel_webhook(
-    payload: Dict[str, Any],
+    payload_bytes: bytes,
     site_name: str,
     topic: str,
     shop_domain: str,
-    event_id: Optional[str] = None
+    event_id: Optional[str] = None,
+    signature: Optional[str] = None
 ) -> Future:
     """Publish Parcel Panel webhook to Pub/Sub"""
     return publish_webhook(
         topic_name=settings.pubsub_topic_parcel_panel,
-        payload=payload,
+        payload_bytes=payload_bytes,
         site_name=site_name,
         source='parcel_panel',
         topic=topic,
         shop_domain=shop_domain,
-        event_id=event_id
+        event_id=event_id,
+        signature=signature,
+        signature_header='X-Parcel-Panel-Signature'
     )
