@@ -60,7 +60,7 @@ def publish_webhook(
     attributes = {
         'event_id': event_id,
         'source': source,
-        'topic': topic,
+        'webhook_topic': topic,
         'shop_domain': shop_domain,
         'site_name': site_name,
     }
