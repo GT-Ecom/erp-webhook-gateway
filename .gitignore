@@ -35,3 +35,6 @@ ENV/
 htmlcov/
 
 *.log
+
+env-production.yaml
+env-staging.yaml

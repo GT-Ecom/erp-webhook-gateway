@@ -2,10 +2,84 @@ import json
 import uuid
 import logging
 import time
+import requests
 from typing import Any, Dict, Optional
 from contextvars import ContextVar
+import graypy
+
+from .config import settings
 
 correlation_id: ContextVar[Optional[str]] = ContextVar('correlation_id', default=None)
+
+
+class SlackHandler(logging.Handler):
+    """Send error logs to Slack channel"""
+    
+    def __init__(self, webhook_url: str, channel: str):
+        super().__init__()
+        self.webhook_url = webhook_url
+        self.channel = channel
+        self.setLevel(logging.ERROR)
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            
+            shop_domain = getattr(record, 'shop_domain', 'unknown')
+            site_name = getattr(record, 'site_name', 'unknown')
+            source = getattr(record, 'source', 'unknown')
+            topic = getattr(record, 'topic', 'unknown')
+            event_id = getattr(record, 'event_id', 'unknown')
+            cid = correlation_id.get() or 'unknown'
+            
+            slack_message = {
+                "channel": self.channel,
+                "username": "ERP Webhook Gateway Alert",
+                "icon_emoji": ":warning:",
+                "attachments": [
+                    {
+                        "color": "danger",
+                        "title": f"Error in {settings.environment.upper()} environment",
+                        "fields": [
+                            {"title": "Level", "value": record.levelname, "short": True},
+                            {"title": "Logger", "value": record.name, "short": True},
+                            {"title": "Shop Domain", "value": shop_domain, "short": True},
+                            {"title": "Site Name", "value": site_name, "short": True},
+                            {"title": "Source", "value": source, "short": True},
+                            {"title": "Topic", "value": topic, "short": True},
+                            {"title": "Event ID", "value": event_id, "short": True},
+                            {"title": "Correlation ID", "value": cid, "short": True},
+                            {"title": "Message", "value": message, "short": False}
+                        ],
+                        "footer": "ERP Webhook Gateway",
+                        "ts": int(time.time())
+                    }
+                ]
+            }
+            
+            if record.exc_info:
+                exception_text = self.formatter.formatException(record.exc_info)
+                slack_message["attachments"][0]["fields"].append({
+                    "title": "Exception",
+                    "value": f"```{exception_text}```",
+                    "short": False
+                })
+            
+            requests.post(self.webhook_url, json=slack_message, timeout=5)
+            
+        except Exception:
+            self.handleError(record)
+
+
+class WebhookGatewayFilter(logging.Filter):
+    """Inject context fields into each log record"""
+    
+    def filter(self, record: logging.LogRecord) -> bool:
+        environment = settings.environment
+        record._environment = environment
+        record._app = "erp-webhook-gateway"
+        record._tag = f"ERP-WEBHOOK-GATEWAY-{environment.upper()}"
+        return True
 
 
 class StructuredFormatter(logging.Formatter):
@@ -18,6 +92,7 @@ class StructuredFormatter(logging.Formatter):
             'logger': record.name,
             'message': record.getMessage(),
             'correlation_id': correlation_id.get(),
+            'environment': settings.environment,
         }
         
         for attr in ['event_id', 'shop_domain', 'topic', 'source', 'site_name', 'duration_ms']:
@@ -31,14 +106,62 @@ class StructuredFormatter(logging.Formatter):
         return json.dumps(log_data)
 
 
-def setup_logging(level: int = logging.INFO) -> None:
-    """Configure structured JSON logging"""
-    handler = logging.StreamHandler()
-    handler.setFormatter(StructuredFormatter())
+def get_graylog_handler() -> Optional[graypy.GELFTCPHandler]:
+    """Get configured Graylog handler"""
+    if not settings.graylog_enabled or not settings.graylog_host:
+        return None
     
+    try:
+        handler = graypy.GELFTCPHandler(
+            settings.graylog_host,
+            settings.graylog_port,
+            extra_fields={
+                "_app": "erp-webhook-gateway",
+                "_environment": settings.environment,
+            }
+        )
+        handler.setLevel(logging.INFO)
+        handler.addFilter(WebhookGatewayFilter())
+        return handler
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to configure Graylog handler: {e}")
+        return None
+
+
+def get_slack_handler() -> Optional[SlackHandler]:
+    """Get configured Slack handler for error alerts"""
+    if not settings.slack_enabled or not settings.slack_webhook_url:
+        return None
+    
+    try:
+        handler = SlackHandler(settings.slack_webhook_url, settings.slack_channel)
+        handler.setLevel(logging.ERROR)
+        return handler
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to configure Slack handler: {e}")
+        return None
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    """Configure structured JSON logging with Graylog and Slack support"""
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
-    root_logger.handlers = [handler]
+    
+    handlers = []
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(StructuredFormatter())
+    handlers.append(console_handler)
+    
+    graylog_handler = get_graylog_handler()
+    if graylog_handler:
+        handlers.append(graylog_handler)
+    
+    slack_handler = get_slack_handler()
+    if slack_handler:
+        handlers.append(slack_handler)
+    
+    root_logger.handlers = handlers
 
 
 def generate_correlation_id() -> str:
