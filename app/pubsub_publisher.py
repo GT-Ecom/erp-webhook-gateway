@@ -22,6 +22,58 @@ def get_publisher_client() -> pubsub_v1.PublisherClient:
     return _publisher_client
 
 
+def extract_entity_info(topic: str, payload: bytes) -> Optional[str]:
+    """Extract entity type and ID for ordering key
+    
+    Args:
+        topic: Webhook topic (e.g., orders/create, products/update)
+        payload: Raw webhook payload bytes
+        
+    Returns:
+        Ordering key in format '{entity_type}:{entity_id}' or None
+    """
+    try:
+        data = json.loads(payload.decode('utf-8'))
+        
+        # Extract entity ID based on topic
+        if topic.startswith('orders/'):
+            entity_id = data.get('id') or data.get('order', {}).get('id')
+            if entity_id:
+                return f"order:{entity_id}"
+        
+        elif topic.startswith('products/'):
+            entity_id = data.get('id') or data.get('product', {}).get('id')
+            if entity_id:
+                return f"product:{entity_id}"
+        
+        elif topic.startswith('fulfillments/'):
+            entity_id = data.get('id') or data.get('fulfillment', {}).get('id')
+            order_id = data.get('order_id') or data.get('fulfillment', {}).get('order_id')
+            if entity_id:
+                return f"fulfillment:{entity_id}"
+            elif order_id:
+                return f"order:{order_id}"
+        
+        elif topic.startswith('inventory_levels/'):
+            inventory_item_id = data.get('inventory_item_id')
+            if inventory_item_id:
+                return f"inventory_item:{inventory_item_id}"
+        
+        # Parcel Panel topics
+        elif topic in ('tracking_update', 'fulfillment_update'):
+            order_id = data.get('order_id') or data.get('order', {}).get('id')
+            tracking_number = data.get('tracking_number')
+            if order_id:
+                return f"order:{order_id}"
+            elif tracking_number:
+                return f"tracking:{tracking_number}"
+        
+        return None
+        
+    except (json.JSONDecodeError, Exception):
+        return None
+
+
 def publish_webhook(
     topic_name: str,
     payload_bytes: bytes,
@@ -33,7 +85,7 @@ def publish_webhook(
     signature: Optional[str] = None,
     signature_header: Optional[str] = None
 ) -> Future:
-    """Publish webhook to Pub/Sub
+    """Publish webhook to Pub/Sub with ordering key
     
     Args:
         topic_name: Pub/Sub topic name
@@ -70,13 +122,25 @@ def publish_webhook(
     if signature_header:
         attributes['signature_header'] = signature_header
     
+    # Extract ordering key for message ordering
+    ordering_key = extract_entity_info(topic, payload_bytes)
+    
     logger.info(
         f"Publishing to {topic_name}: event_id={event_id}, site_name={site_name}, "
         f"source={source}, topic={topic}, has_signature={signature is not None}, "
-        f"payload_size={len(payload_bytes)}"
+        f"payload_size={len(payload_bytes)}, ordering_key={ordering_key}"
     )
     
-    future = publisher.publish(topic_path, data, **attributes)
+    # Publish with ordering key if available
+    if ordering_key:
+        future = publisher.publish(
+            topic_path, 
+            data, 
+            ordering_key=ordering_key,
+            **attributes
+        )
+    else:
+        future = publisher.publish(topic_path, data, **attributes)
     
     return future
 
