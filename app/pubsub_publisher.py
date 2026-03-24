@@ -4,7 +4,6 @@ import logging
 from typing import Dict, Any, Optional
 from google.cloud import pubsub_v1
 from google.cloud.pubsub_v1.publisher.futures import Future
-from google.cloud.pubsub_v1.publisher.options import PublisherOptions
 
 from .config import settings
 
@@ -18,9 +17,8 @@ def get_publisher_client() -> pubsub_v1.PublisherClient:
     global _publisher_client
     
     if _publisher_client is None:
-        _publisher_client = pubsub_v1.PublisherClient(
-            publisher_options=PublisherOptions(enable_message_ordering=True)
-        )
+        publisher_options = pubsub_v1.types.PublisherOptions(enable_message_ordering=True)
+        _publisher_client = pubsub_v1.PublisherClient(publisher_options=publisher_options)
     
     return _publisher_client
 
