@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Any, Optional
 from google.cloud import pubsub_v1
 from google.cloud.pubsub_v1.publisher.futures import Future
+from google.cloud.pubsub_v1.publisher.options import PublisherOptions
 
 from .config import settings
 
@@ -13,11 +14,13 @@ _publisher_client: Optional[pubsub_v1.PublisherClient] = None
 
 
 def get_publisher_client() -> pubsub_v1.PublisherClient:
-    """Get or create Pub/Sub publisher client (singleton)"""
+    """Get or create Pub/Sub publisher client (singleton) with message ordering enabled"""
     global _publisher_client
     
     if _publisher_client is None:
-        _publisher_client = pubsub_v1.PublisherClient()
+        _publisher_client = pubsub_v1.PublisherClient(
+            publisher_options=PublisherOptions(enable_message_ordering=True)
+        )
     
     return _publisher_client
 
@@ -131,9 +134,11 @@ def publish_webhook(
         f"payload_size={len(payload_bytes)}, ordering_key={ordering_key}"
     )
     
-    # Note: ordering_key requires PublisherOptions(enable_message_ordering=True)
-    # which needs google-cloud-pubsub>=2.19.0. For now, publish without ordering.
-    future = publisher.publish(topic_path, data, **attributes)
+    publish_kwargs = attributes.copy()
+    if ordering_key:
+        publish_kwargs['ordering_key'] = ordering_key
+    
+    future = publisher.publish(topic_path, data, **publish_kwargs)
     
     return future
 
