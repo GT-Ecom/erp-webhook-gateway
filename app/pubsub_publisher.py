@@ -13,11 +13,13 @@ _publisher_client: Optional[pubsub_v1.PublisherClient] = None
 
 
 def get_publisher_client() -> pubsub_v1.PublisherClient:
-    """Get or create Pub/Sub publisher client (singleton)"""
+    """Get or create Pub/Sub publisher client (singleton) with message ordering enabled"""
     global _publisher_client
     
     if _publisher_client is None:
-        _publisher_client = pubsub_v1.PublisherClient()
+        # Enable message ordering for publishing with ordering keys
+        publisher_options = pubsub_v1.PublisherOptions(enable_message_ordering=True)
+        _publisher_client = pubsub_v1.PublisherClient(publisher_options=publisher_options)
     
     return _publisher_client
 
